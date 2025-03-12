@@ -1,0 +1,4 @@
+risk_policies:
+  max_severity: "MEDIUM"
+  auto_accept_days: 30
+  ignore_cves: ["CVE-2025-9999"]

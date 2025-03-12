@@ -1,0 +1,4 @@
+FROM alpine
+ENV AWS_ACCESS_KEY=AKIA1234567890
+ENV PASSWORD=supersecret123
+CMD ["echo", "Hello"]

@@ -1,0 +1,12 @@
+{
+  "Target": "app:latest",
+  "Vulnerabilities": [
+    {
+      "VulnerabilityID": "CVE-2025-1234",
+      "Severity": "LOW",
+      "Title": "Buffer overflow",
+      "InstalledVersion": "1.2.3",
+      "FixedVersion": "1.2.4"
+    }
+  ]
+}
