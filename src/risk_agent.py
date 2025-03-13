@@ -19,12 +19,12 @@ def load_file(file_path, file_type):
         return None
 
 # Load Trivy JSON file
-trivy_data = load_file('../trivy.json', 'json')
+trivy_data = load_file('trivy.json', 'json')
 if not trivy_data:
     exit(1)
 
 # Load policy YAML file
-policy_data = load_file('../policy.yaml', 'yaml')
+policy_data = load_file('policy.yaml', 'yaml')
 if not policy_data:
     exit(1)
 
@@ -111,7 +111,7 @@ def check_secrets(file_path):
         print(f"Error checking Dockerfile: {e}")
 
 # Run compliance check
-check_secrets('../Dockerfile')
+check_secrets('Dockerfile')
 
 # Print structured JSON output
 print("\nStructured Output (JSON):")
