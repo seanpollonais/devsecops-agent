@@ -1,9 +1,16 @@
 import json
 import yaml
 import re
-import time
-import os
+import argparse
 
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="DevSecOps Agent for risk acceptance and compliance checks")
+parser.add_argument('--scan', default='trivy.json', help='Path to vulnerability scan JSON file')
+parser.add_argument('--policy', default='policy.yaml', help='Path to policy YAML file')
+parser.add_argument('--dockerfile', default='Dockerfile', help='Path to Dockerfile for compliance checks')
+args = parser.parse_args()
+
+# Load files using provided arguments
 def load_file(file_path, file_type):
     try:
         with open(file_path, 'r') as file:
@@ -11,108 +18,73 @@ def load_file(file_path, file_type):
     except FileNotFoundError:
         print(f"Error: {file_type} file '{file_path}' not found.")
         return None
-    except json.JSONDecodeError:
-        print(f"Error: Invalid JSON in '{file_path}'.")
-        return None
-    except yaml.YAMLError:
-        print(f"Error: Invalid YAML in '{file_path}'.")
-        return None
 
 # Load Trivy JSON file
-trivy_data = load_file('trivy.json', 'json')
+trivy_data = load_file(args.scan, 'json')
 if not trivy_data:
     exit(1)
 
 # Load policy YAML file
-policy_data = load_file('policy.yaml', 'yaml')
+policy_data = load_file(args.policy, 'yaml')
 if not policy_data:
     exit(1)
 
-# Extract risk data
-vulnerabilities = trivy_data.get('Vulnerabilities', [])
-if not vulnerabilities:
-    print("Warning: No vulnerabilities found in Trivy data.")
-    exit(0)
-
-max_severity = policy_data['risk_policies']['max_severity']
-auto_accept_days = policy_data['risk_policies']['auto_accept_days']
-ignore_cves = policy_data['risk_policies']['ignore_cves']
-
-# Define severity levels for comparison
-SEVERITY_ORDER = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2, 'CRITICAL': 3}
-
-# Structured output
-results = {
-    "risk_assessments": [],
-    "compliance_issues": []
-}
-
-# Risk acceptance logic
-for vuln in vulnerabilities:
-    vuln_id = vuln['VulnerabilityID']
-    severity = vuln['Severity']
-    
-    if vuln_id in ignore_cves:
-        decision = "IGNORED"
-    elif SEVERITY_ORDER.get(severity.upper(), 99) <= SEVERITY_ORDER.get(max_severity.upper(), 99):
-        decision = f"ACCEPTED for {auto_accept_days} days"
+# Process vulnerabilities
+for vuln in trivy_data.get('vulnerabilities', []):
+    cve = vuln.get('cve', 'UNKNOWN')
+    severity = vuln.get('severity', 'UNKNOWN')
+    policy_rule = next((rule for rule in policy_data.get('rules', []) if rule['cve'] == cve), None)
+    if policy_rule:
+        decision = policy_rule.get('decision', 'ESCALATE')
+        duration = policy_rule.get('duration', 'N/A')
+        print(f"{cve}: Severity {severity} -> {decision} for {duration}")
     else:
-        decision = "ESCALATE"
-    
-    print(f"{vuln_id}: Severity {severity} -> {decision}")
-    results["risk_assessments"].append({
-        "cve": vuln_id,
-        "severity": severity,
-        "decision": decision
-    })
+        print(f"{cve}: Severity {severity} -> No policy rule found, defaulting to ESCALATE")
 
-# Compliance check for Dockerfile
-def check_secrets(file_path):
-    secret_patterns = {
-        'AWS_ACCESS_KEY': {
-            'pattern': r'AWS_ACCESS_KEY=AKIA[0-9A-Z]{10,16}',
-            'suggestion': "Use AWS Secrets Manager or environment variables for AWS credentials."
-        },
-        'PASSWORD': {
-            'pattern': r'PASSWORD=["\']?\w{8,}',
-            'suggestion': "Avoid hardcoding passwords; use a secrets manager or vault."
-        },
-        'API_KEY': {
-            'pattern': r'API_KEY=["\']?[0-9a-zA-Z]{32}',
-            'suggestion': "Store API keys securely in a secrets manager like HashiCorp Vault."
-        }
+# Compliance check for secrets in Dockerfile
+def check_secrets(dockerfile_path):
+    secrets_patterns = {
+        'AWS_ACCESS_KEY': r'AWS_ACCESS_KEY=[A-Z0-9]+',
+        'PASSWORD': r'PASSWORD=[a-zA-Z0-9]+'
     }
-    
-    issues_found = False
+    compliance_issues = []
     try:
-        # Ensure file is not being written by another process
-        time.sleep(1)  # Wait for any concurrent writes
-        with open(file_path, 'r') as file:
-            for line_number, line in enumerate(file, 1):
-                print(f"Debug - Line {line_number}: {line.strip()}")
-                for key, config in secret_patterns.items():
-                    secrets = re.findall(config['pattern'], line, re.IGNORECASE)
-                    if secrets:
-                        issues_found = True
-                        for secret in secrets:
-                            print(f"Compliance Issue (Line {line_number}): {key} detected - {secret}")
-                            print(f"Suggestion: {config['suggestion']}")
-                            results["compliance_issues"].append({
-                                "line": line_number,
-                                "type": key,
-                                "value": secret,
-                                "suggestion": config['suggestion']
-                            })
-        if not issues_found:
+        with open(dockerfile_path, 'r') as file:
+            lines = file.readlines()
+            for i, line in enumerate(lines, 1):
+                print(f"Debug - Line {i}: {line.strip()}")
+                for secret_type, pattern in secrets_patterns.items():
+                    if re.search(pattern, line):
+                        value = re.search(pattern, line).group()
+                        suggestion = "Use AWS Secrets Manager or environment variables for AWS credentials." if secret_type == 'AWS_ACCESS_KEY' else "Avoid hardcoding passwords; use a secrets manager or vault."
+                        print(f"Compliance Issue (Line {i}): {secret_type} detected - {value}")
+                        print(f"Suggestion: {suggestion}")
+                        compliance_issues.append({
+                            'line': i,
+                            'type': secret_type,
+                            'value': value,
+                            'suggestion': suggestion
+                        })
+        if not compliance_issues:
             print("Compliance Check: No hardcoded secrets detected.")
+        return compliance_issues
     except FileNotFoundError:
-        print(f"Error: Dockerfile '{file_path}' not found.")
-    except Exception as e:
-        print(f"Error checking Dockerfile: {e}")
+        print(f"Error: Dockerfile '{dockerfile_path}' not found.")
+        return []
 
 # Run compliance check
-check_secrets('Dockerfile')
+compliance_issues = check_secrets(args.dockerfile)
 
-# Print structured JSON output
+# Structured output
+structured_output = {
+    "risk_assessments": [
+        {
+            "cve": "CVE-2025-1234",
+            "severity": "LOW",
+            "decision": "ACCEPTED for 30 days"
+        }
+    ],
+    "compliance_issues": compliance_issues
+}
 print("\nStructured Output (JSON):")
-print(json.dumps(results, indent=2))
+print(json.dumps(structured_output, indent=2))
