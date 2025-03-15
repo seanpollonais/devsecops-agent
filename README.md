@@ -16,3 +16,13 @@ Run in Docker:
 docker build -f Dockerfile -t devsecops-agent .
 docker run --rm -v $(pwd):/app devsecops-agent
 ```
+## Installation
+- **Prerequisites**: Docker, Python 3.9+, pip.
+- **Local Setup**: Install dependencies: `pip3 install pyyaml`.
+- **Docker Setup**: Build and run: `docker build -f Dockerfile -t devsecops-agent .` and `docker run --rm -v $(pwd):/app devsecops-agent`.
+
+## Contributing
+- Fork the repository.
+- Create a branch: `git checkout -b feature-branch`.
+- Commit changes: `git commit -m "Add feature"`.
+- Push and submit a pull request.
