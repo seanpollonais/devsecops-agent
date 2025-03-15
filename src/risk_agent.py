@@ -3,14 +3,12 @@ import yaml
 import re
 import argparse
 
-# Parse command-line arguments
 parser = argparse.ArgumentParser(description="DevSecOps Agent for risk acceptance and compliance checks")
 parser.add_argument('--scan', default='trivy.json', help='Path to vulnerability scan JSON file')
 parser.add_argument('--policy', default='policy.yaml', help='Path to policy YAML file')
 parser.add_argument('--dockerfile', default='Dockerfile', help='Path to Dockerfile for compliance checks')
 args = parser.parse_args()
 
-# Load files using provided arguments
 def load_file(file_path, file_type):
     try:
         with open(file_path, 'r') as file:
@@ -19,17 +17,14 @@ def load_file(file_path, file_type):
         print(f"Error: {file_type} file '{file_path}' not found.")
         return None
 
-# Load Trivy JSON file
 trivy_data = load_file(args.scan, 'json')
 if not trivy_data:
     exit(1)
 
-# Load policy YAML file
 policy_data = load_file(args.policy, 'yaml')
 if not policy_data:
     exit(1)
 
-# Process vulnerabilities
 for vuln in trivy_data.get('vulnerabilities', []):
     cve = vuln.get('cve', 'UNKNOWN')
     severity = vuln.get('severity', 'UNKNOWN')
@@ -41,11 +36,12 @@ for vuln in trivy_data.get('vulnerabilities', []):
     else:
         print(f"{cve}: Severity {severity} -> No policy rule found, defaulting to ESCALATE")
 
-# Compliance check for secrets in Dockerfile
 def check_secrets(dockerfile_path):
-    secrets_patterns = {
+    compliance_rules = {
         'AWS_ACCESS_KEY': r'AWS_ACCESS_KEY=[A-Z0-9]+',
-        'PASSWORD': r'PASSWORD=[a-zA-Z0-9]+'
+        'PASSWORD': r'PASSWORD=[a-zA-Z0-9]+',
+        'UNENCRYPTED_S3': r'aws_s3_bucket.*encryption:\s*none',  # GDPR/SOC 2: Unencrypted S3 buckets
+        'DATA_RETENTION': r'retention:\s*none'  # GDPR: Lack of data retention policy
     }
     compliance_issues = []
     try:
@@ -53,29 +49,32 @@ def check_secrets(dockerfile_path):
             lines = file.readlines()
             for i, line in enumerate(lines, 1):
                 print(f"Debug - Line {i}: {line.strip()}")
-                for secret_type, pattern in secrets_patterns.items():
-                    if re.search(pattern, line):
-                        value = re.search(pattern, line).group()
-                        suggestion = "Use AWS Secrets Manager or environment variables for AWS credentials." if secret_type == 'AWS_ACCESS_KEY' else "Avoid hardcoding passwords; use a secrets manager or vault."
-                        print(f"Compliance Issue (Line {i}): {secret_type} detected - {value}")
+                for rule_name, pattern in compliance_rules.items():
+                    if re.search(pattern, line, re.IGNORECASE):
+                        value = re.search(pattern, line, re.IGNORECASE).group()
+                        suggestion = {
+                            'AWS_ACCESS_KEY': "Use AWS Secrets Manager or environment variables for AWS credentials.",
+                            'PASSWORD': "Avoid hardcoding passwords; use a secrets manager or vault.",
+                            'UNENCRYPTED_S3': "Enable encryption for S3 buckets to comply with GDPR/SOC 2.",
+                            'DATA_RETENTION': "Define a data retention policy to comply with GDPR."
+                        }.get(rule_name)
+                        print(f"Compliance Issue (Line {i}): {rule_name} detected - {value}")
                         print(f"Suggestion: {suggestion}")
                         compliance_issues.append({
                             'line': i,
-                            'type': secret_type,
+                            'type': rule_name,
                             'value': value,
                             'suggestion': suggestion
                         })
         if not compliance_issues:
-            print("Compliance Check: No hardcoded secrets detected.")
+            print("Compliance Check: No issues detected.")
         return compliance_issues
     except FileNotFoundError:
         print(f"Error: Dockerfile '{dockerfile_path}' not found.")
         return []
 
-# Run compliance check
 compliance_issues = check_secrets(args.dockerfile)
 
-# Structured output
 structured_output = {
     "risk_assessments": [
         {
